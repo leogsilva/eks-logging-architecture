@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-config
+  labels:
+    app.kubernetes.io/name: fluentbit
+  namespace: cw
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Parsers_File  parsers.conf
+    [INPUT]
+        Name              tail
+        Tag               kube.*
+        Path              /var/log/containers/*.log
+        Parser            docker
+        DB                /var/log/flb_kube.db
+        Mem_Buf_Limit     5MB
+        Skip_Long_Lines   On
+        Refresh_Interval  10
+    [INPUT]
+        Name              tail
+        Tag               apps.*
+        Path              /tmp/apps/*.log
+        Parser_Firstline  apps
+        DB                /tmp/apps/flb_apps.db
+        Mem_Buf_Limit     5MB
+        Refresh_Interval  10
+        Multiline On  
+    [FILTER]
+        Name parser
+        Match kube.*
+        Parser nginx
+        Key_Name log
+    [FILTER]
+        Name parser
+        Match apps.*
+        Parser apps
+        Key_Name apps        
+    [OUTPUT]
+        Name firehose
+        Match apps.*
+        delivery_stream eks-stream
+        region us-east-1
+  parsers.conf: |
+    [PARSER]
+        Name   apps
+        Format regex
+        Regex ^(?<timestamp>[0-9]{2,4}\-[0-9]{1,2}\-[0-9]{1,2} [0-9]{1,2}\:[0-9]{1,2}\:[0-9]{1,2}\,\d{1,6}) (?<level>[^ ]*\s{0,2}) \[(?<component>[^\]]*)\] (?<message>.*)
+    [PARSER]
+        Name   nginx
+        Format regex
+        Regex ^(?<remote>[^ ]*) (?<host>[^ ]*) (?<user>[^ ]*) \[(?<time>[^\]]*)\] "(?<method>\S+)(?: +(?<path>[^\"]*?)(?: +\S*)?)?" (?<code>[^ ]*) (?<size>[^ ]*)(?: "(?<referer>[^\"]*)" "(?<agent>[^\"]*)")? \"-\"$
+        Time_Key time
+        Time_Format %d/%b/%Y:%H:%M:%S %z
+    [PARSER]
+        Name        docker
+        Format      json
+        Time_Key    time
+        Time_Format %Y-%m-%dT%H:%M:%S.%L
+        Time_Keep   On
+        # Command      |  Decoder | Field | Optional Action
+        # =============|==================|=================
+        Decode_Field_As   escaped    log
